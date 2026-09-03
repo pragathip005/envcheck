@@ -405,6 +405,54 @@ V0/V1 verifiers" - 150 (buffer over the 100 target), each with a grader for
 both conditions and a confirmed-passing reference solution, not synthetic or
 assumed data.
 
+### 2026-09-03 — Built and verified V2 (HardTests-generated tests, HackGen included)
+Decoding a real `sigcp/hardtests_tests` row needed two separate fixes beyond
+just calling `load_dataset(..., streaming=True)` (which had already been
+shown to hang on this dataset - see the earlier "Built and verified V0"
+entry): plain row-by-row streaming stayed stuck with no progress, so found
+matches for our pool's pids by reading just the cheap `pid` column of each
+shard via direct `fsspec` range-reads (fast - found a match in shard 0
+almost immediately) - then, once a shard was confirmed relevant, pulling its
+*other* columns (`test_cases_kit`, `mapping`, the actual `test_cases` blob)
+via range-reads timed out repeatedly (`FSTimeoutError`) even at a 300s
+limit - that data is evidently too large for partial HTTP range fetches to
+reliably assemble. Fixed by downloading the whole shard file locally with
+`huggingface_hub.hf_hub_download` (a proper single resumable download)
+instead of fighting range-reads for columns already known to be present.
+Both pieces now live in `c1/hardtests_tests.py`.
+
+**Confirmed the full generator -> mapping -> test_cases chain by hand, not
+just by reading the schema.** For `codeforces_1047_d`: `HackGen` produced
+two real Python functions,
+`gen_hacking_input_edge_case` (fixes n=1, randomizes the rest) and
+`gen_hacking_input_large_values` (n=m=10^9, a max-scale stress test).
+`mapping.HackGen` pointed the first at test_cases indices [28..37] and the
+second at [38]. Decoded `test_cases[38]` by hand:
+`{"input": "1000000000 1000000000", "output": "1000000000000000000"}` -
+exactly what `gen_hacking_input_large_values` should produce. The pipeline
+does what the schema says it does.
+
+**`output_judging_function`'s real signature, confirmed from three actual
+examples, not the dataset card alone:**
+`output_judging_function(input_str, candidate_output, reference_output) -> bool`.
+It's `None` for many problems (plain problems where exact string match is
+correct - not every V2 problem needs a custom checker, refining what the
+earlier "Why V2 can't just be string-compare" concept entry implied). Wired
+into `make_v2_grader` (`c1/verifiers.py`): when present, it's executed as
+its own subprocess (input/candidate/reference passed as JSON over stdin, to
+avoid the same command-line-length problem the fourth bug hit) - same
+sandboxing caveat as candidate code, since it's LLM-generated too, not
+hand-vetted.
+
+**End-to-end test: 15/15 pool problems fully clean across V0, V1, *and*
+V2 simultaneously** (gold=1.0 / wrong=0.0 on all three), including 3 of the
+15 that have a real custom `output_judging_function` - confirming that path
+works, not just plain exact-match. Only checked 15 of 150 so far (V2 data
+was only fetched for 17/150 within a 30-shard scan budget - fetching the
+rest is straightforward, same function, no new blocker). **V0, V1, and V2
+are now all real and independently verified** - the three conditions
+plan.md §2 needs before V3 (which depends on C2, still blocked).
+
 ---
 
 ## Concepts
