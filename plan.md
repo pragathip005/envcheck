@@ -1,201 +1,142 @@
-# envcheck / EnvTrust-Bench — Execution Plan v2
+# Plan v4 — Does Verifier Hardening Change What RL Learns?
 
-*Research-first. Direction 1: reward-signal validity in non-code RL environments.*
+Owners: Blitz + Pragathi · Advisor: Dr. Shylaja · Hardware: RTX 4090 (24 GB) + API + one optional cloud run · Window: 24–28 weeks
 
-Owners: Blitz + Pragathi. Advisor: Dr. Shylaja. Hardware: RTX 4090 (24 GB) confirmed; + API credits. Window: ~24 weeks to main-track submission.
+**v4 changes (after repo/paper verification):** C1 pilot moves from terminal environments to algorithmic coding (small models can't learn on Terminal Wrench tasks); training stack fixed to Unsloth GRPO on a single GPU; exact repos, datasets and detectors named; hypothesis support cited (2604.15149, HardTestGen).
 
-**Changed from v1:** the tool is now a by-product, not the goal. Judge-bias probes demoted to a sub-result. Adversary precision added as a first-class measurement. Timeline extended from 16 to 24 weeks to reach a publishable result. GPU plan added.
-
-**Changed from v1 again, this pass:** three gaps closed after comparing v1 and v2 side by side — a validation step for the certification pipeline itself (§1a), an explicit scope-cut order now that ambition grew faster than the timeline did (§7a), and a one-line disclosure norm for named environments now that the vendor-pilot angle is gone but the research-access asks (Corecraft/Surge AI) aren't (§6a). Everything else below is v2 as received.
+**Changed again, this pass:** one gap closed after review — an explicit cut order for the weeks 19–23 run volume (§5a), since up to ~30 training runs on a single 4090 in 5 weeks is the single largest unaddressed schedule risk in the plan. Everything else below is v4 as received. All named external repos/datasets (harden-v0, terminal-wrench, HardTestGen/HardTests, ImpossibleBench, evilgenie_inspect) were independently verified real and current before adopting this plan.
 
 ---
 
-## 0. Goal
+## 0. The three claims
 
-**Primary:** a main-track or D&B paper answering: *under a fixed attack budget, what fraction of reward in tool-use and rubric-graded RL environments goes to expert-judged-incorrect solutions, how does it compare to code, and how reliable is the automated auditor itself?*
-**Secondary:** the released benchmark (EnvTrust-Bench), labelled exploit set, and the `envcheck` tool.
-**Now in scope (4090):** the causal result at small scale — do grader defects become policy defects after RL? Partner/cloud only for the 7B+ headline version.
-**Not the goal:** revenue.
+- **C1 (headline):** Policies RL-trained against hardened verifiers hack less on held-out and impossible tasks, and generalize no worse, than policies trained against the original verifiers.
+- **C2 (method):** A validity-preserving hardener — certified adversary + solver ensemble + explicit validity constraint — matches the baseline loop's attack-success reduction with < 3 pp legitimate-solution loss (baseline loses ~11 pp).
+- **C3 (extension):** Hardening for state-checked and rubric-graded environments — new fixer mechanics, first measurement of hackability before/after.
 
-Done means: ≥4 environments audited, ≥300 expert-labelled items with κ reported, adversary precision measured, validity metric defined, replication of the prior code result, synthesized-vs-hand-built comparison, paper submitted.
-
----
-
-## 1. Research design (fixed before code)
-
-**Hypotheses.**
-- H1: non-code environments leak reward to incorrect solutions at rates ≥ code environments at K=8.
-- H2: semantic exploits dominate in rubric environments; mechanical exploits dominate in code.
-- H3: automated adversary precision is lower on rubric tasks than on code/tool-use.
-- H4 (optional): synthesized tasks show higher gold-gate failure and near-dup rates than hand-built ones.
-
-**Baselines.** Human-authored wrong solutions; the 2606.16062 pipeline on code; a random-wrong adversary.
-
-**Environments.** τ-bench retail/airline (tool-use, state-checked); one Prime Intellect hub tool env; one rubric-graded env (Corecraft if accessible, else constructed 100-task support/finance-ops env); R2E-Gym sample (code control); one synthesized env (AutoForge/AWM-style output). 100 tasks each.
-
-**Metrics.** Task-level defect rate; score-level reward leakage (graded tasks); adversary precision; κ; gold-gate failure rate; near-dup rate; cost per audited task. Wilson CIs, bootstrap over tasks, K budget pre-registered.
-
-**Ablations.** Drop each exploit family; K ∈ {2,4,8,16}; swap adversary model; swap certification judge family; disable gold gate.
-
-**Stress tests.** Injected-defect environments (recall); deliberately hardened environments (false-positive rate).
-
-**Generalization.** Hold out one family; does the taxonomy transfer?
-
-**Claim after the experiment:** a quantified, ground-truthed defect rate for non-code environments with the auditor's own error bar — which nobody can state today.
-
-### 1a. Certifier validation (new — closes a reflexivity gap)
-
-`probes/certify.py` (§3) decides whether an adversary-generated candidate is genuinely wrong using cross-family LLM judges. That certifying judge is itself an LLM, subject to the same trust problem this paper studies — a sharp reviewer's obvious question is "how do you know your certifier is right?" Answer it before they ask: run the certifier against the same human-labelled subset used for κ, report the certifier's own agreement/error rate against those human labels, and carry that number in the paper alongside adversary precision. Without this, the paper's headline defect rate silently inherits an unmeasured judge-bias error term from the one component meant to guard against exactly that.
+Fallback if C1 shows no effect: paper = C2 + C3 + C1 negative result → D&B / ACL / ICSE instead of main track.
 
 ---
 
-## 2. Reading (week 1)
+## 1. Stack (all verified public)
 
-Core: 2606.16062 (replicate), 2606.04923 (rubric RL hacking — template for causal study), 2604.15149, 2605.02964, 2603.12011, 2602.16179, 2602.10090, 2512.22857, 2601.16443, τ-bench 2406.12045.
-Judge bias (cite, don't reinvent): 2410.02736 (CALM), 2410.12784 (JudgeBench), 2606.19544.
-Theory: mutation testing (DeMillo, Lipton & Sayward 1978) — frame hackability as mutation adequacy for reward functions.
-Method: MAST 2503.13657 for taxonomy + κ methodology.
-Tooling: Prime Intellect `verifiers` docs + Environments Hub.
-
----
-
-## 3. Architecture (minimal — build only what the paper needs)
-
-```
-envcheck/
-  adapters/verifiers.py        # only format for now
-  probes/gold_sanity.py        # gold passes; null/random-wrong fail
-  probes/adversary.py          # exploit taxonomy -> K wrong candidates per task
-  probes/certify.py            # is the candidate genuinely wrong? gold-diff + cross-family judges + human queue
-  probes/difficulty.py         # 3-tier sweep (7B open / mid / frontier)
-  probes/diversity.py          # near-dup + template collapse
-  scoring/validity.py          # task-level defect + score-level leakage; Trust Score
-  report/                      # JSON + HTML; --fail-under for CI (last)
-bench/                         # manifests, labels, leaderboard scripts
-paper/
-```
-
-Rules: probes independent; exploit pack versioned separately; every report states K, adversary model, certification model; score is probabilistic — never say "verified". Per §1a, every report that cites a certify.py verdict also carries the certifier's own measured agreement rate against the human-labelled subset — the certification model is a probe with an error rate too, not ground truth.
-
-Note on what's already built: the code so far (`adapters/verifiers_adapter.py`, `probes/gold_sanity.py`, `probes/hackability.py`, `scoring/`, a demo `cli.py`) maps directly onto this architecture — `hackability.py` is `probes/adversary.py` in substance. `probes/certify.py` is the one genuinely new component; `scoring/validity.py` additionally needs score-level (continuous) leakage, not just the binary KEEP/FIX/DROP verdict our `scoring/` currently produces.
-
----
-
-## 4. Exploit taxonomy v0 (mechanical vs semantic)
-
-Mechanical (code/tool): test special-casing; assertion removal; grader monkey-patching; early exit; partial implementation; claim-completion-without-side-effects; minimal-action shortcuts.
-Semantic (rubric/reasoning): rubric parroting; length padding; confident hedging; sycophantic preamble/self-praise; refusal-as-safe; answer reordering/format games; exploiting the verifier's implicit correctness assumptions (2604.15149).
-Each: generator prompt, "must be genuinely wrong" certification path, expected-failure assertion.
-
----
-
-## 5. Hardware and budget (RTX 4090, 24 GB)
-
-What the 4090 changes:
-- **Bulk adversarial generation moves local.** Serve Qwen3-14B or Qwen2.5-Coder-14B in 4-bit via vLLM/SGLang on the 4090 for the K-candidate adversary; use frontier APIs only for certification and the final leaderboard. Cuts API spend roughly in half.
-- **Difficulty sweep is trivial.** 7B/14B tiers run locally at full speed.
-- **Direction 3 (causal RL) is on the table at small scale.** Recipe: GRPO via TRL or verl on Qwen3-1.7B / Qwen2.5-1.5B-Instruct full-parameter, or Qwen3-4B with LoRA; rollouts with vLLM on the same card, alternating rollout/train phases (don't try to co-host both at once). Environments: injected-defect variants of τ-bench-style tool tasks with a known defect profile. Target: 200–500 RL steps per condition × 3 defect conditions + 1 clean control. Expect 1–3 days wall-clock per condition — but budget calendar time for RL infrastructure debugging (vLLM/TRL integration, OOMs from co-hosting rollout and train) separately from raw GPU-hours; a first-time setup's debugging time reliably dwarfs the run time itself.
-- **Still out of reach locally:** 7–8B full RL on real environments for a headline result — 1× A100-80GB/H100, 150–300 GPU-h — $400–900, or a partner cluster.
-
-| Work | Where |
-|---|---|
-| Adversary generation (bulk) | 4090, 14B 4-bit local |
-| Certification | Frontier API (cross-family) |
-| Difficulty sweep | 4090 |
-| Small-scale causal RL (≤4B) | 4090 |
-| 7B+ causal RL | Cloud A100/H100 or partner |
-
-Budget: API $400–800 (down from $800–1,500); expert labelling $300–800; cloud GPU $0–900 (optional). Total: $0.7k–2.5k.
-
-## 6. People and asks (do in week 2)
-
-- Pragathi: co-builder, second annotator, rubric env construction.
-- Dr. Shylaja: venue + authorship agreement; GPU/cluster access for Direction 3.
-- bandr / lab partner: "if I deliver audited environments with known defect profiles, will you run the RL and co-author?"
-- Prime Intellect hub maintainers: integration + a pre-publish check; distribution.
-- Surge AI: request Corecraft access for research.
-
-### 6a. Disclosure norm for named environments (new)
-
-v1 had a vendor-pilot angle and, with it, a real conflict of interest (audit-and-expose vs. audit-and-sell), mitigated there with a coordinated-disclosure policy. v2 drops the vendor pitch, but the tension didn't fully disappear — the paper will still publish a measured defect rate against named environments (Corecraft, hub environments) whose maintainers you're asking for research access. Keep it simple here rather than reviving the full v1 policy: share the relevant measured results with an identifiable environment's maintainer before publication, as a courtesy and good-faith gesture for research access granted, not as something that can block or delay publication. State this plainly in the paper's methodology section. Environments with no identifiable maintainer (scraped/synthetic ones) need no such step.
-
----
-
-## 7. Timeline (24 weeks)
-
-**Week 1 — go/no-go.** 20 hand-crafted plausible-wrong solutions on τ-bench retail; count acceptances; two independent labels; κ. Publish the number.
-- GO if ≥10% accepted and κ ≥ 0.7. PIVOT to H4 (synthesized envs) if <5%. Talk before continuing if in between.
-
-**Weeks 2–4 — replicate + automate.** Reproduce 2606.16062's gold gate + hackability on R2E-Gym sample; build adapter, gold gate, adversary with full taxonomy; first automated run on τ-bench. Send partner asks.
-
-**Weeks 5–8 — three environments + precision.** Add hub tool env; defect rates with CIs on ≥300 tasks; adversary precision on 50-item human subset; certification pipeline v1 (with the §1a self-check against the human-labelled subset). **Workshop-paper-ready.** Submit to the nearest workshop as a marker.
-
-**Weeks 9–12 — the novel half.** Rubric-graded environment (Corecraft or constructed); score-level leakage metric; 150+ labelled rubric items; semantic-vs-mechanical rates per family.
-
-**Weeks 13–16 — breadth + comparison.** Synthesized environment audit (H4); ≥300 total labels; difficulty + diversity probes; internal leaderboard; **main-track draft outline.** Tool v0.1 on PyPI (one week of polish, no more).
-
-**Weeks 17–20 — rigor.** Ablations (exploit family, K, adversary model, judge family, gold gate); injected-defect recall and hardened-env FPR; held-out-family generalization; bootstrap CIs. Direction 3 on the 4090: GRPO on Qwen3-1.7B across 3 injected-defect conditions + clean control; measure post-training behaviour against the pre-training defect profile. Partnered 7B run if available.
-
-**Weeks 21–24 — write + submit.** Full draft, internal review by advisor + one external reader, release benchmark + labelled set + audit logs, submit.
-
-Venue targets: workshop (week 8 result) at ICLR 2027 / NeurIPS 2026 workshops; main track (week 24) at NeurIPS 2027 D&B, ACL 2027 systems, or ICSE/FSE 2027–28 cycle. Verify exact deadlines at commit time.
-
-Effort assumption: 15–20 hrs/week each. Below that, multiply by 1.5.
-
-### 7a. Scope-cut order if behind schedule (new)
-
-Ambition grew more than the timeline did in v2 (formal hypotheses, ablations, stress tests, a generalization check, a full certification pipeline, *and* real RL training runs, for +50% more time). If week 16–18 arrives behind schedule, cut in this order — decide it now, not under deadline pressure:
-1. **Direction 3 (causal RL) first.** It's the single riskiest, most infrastructure-heavy line item and the plan already has an honest exit ("report as negative result, scope as future work" — §8 kill criteria) — use it rather than fighting to keep the RL runs alive alongside everything else.
-2. **H4 (synthesized-vs-hand-built comparison)** next — it's explicitly marked optional in §1.
-3. **Environment count** — 4 environments with full rigor (ablations, CIs, certifier validation) beats 5–6 audited shallowly.
-Never cut: the gold gate, adversary precision measurement, κ-reported human labelling, or the certifier validation from §1a — these are the paper's actual evidentiary core.
-
----
-
-## 8. Milestone metrics
-
-| | Wk 4 | Wk 8 | Wk 16 | Wk 24 |
-|---|---|---|---|---|
-| Environments | 2 | 3 | 5 | 5–6 |
-| Tasks audited | 200 | 300 | 500 | 600+ |
-| Labelled items (κ reported) | 20 | 50 | 300 | 300+ |
-| Adversary precision measured | — | yes | yes | yes |
-| Certifier agreement vs. human labels (§1a) | — | yes | yes | yes |
-| Validity metric defined | — | draft | final | final |
-| Replication of 2606.16062 | done | — | — | — |
-| Synthesized-vs-hand-built | — | — | done | done |
-| RL causal result | — | — | — | small-scale or partnered |
-| Paper | number posted | workshop | draft | submitted |
-
-Kill criteria: week-1 gate fails on both H1 and H4 — write negative result, stop. Week 12: rubric labels can't reach κ ≥ 0.6 — narrow to tool-use only, state limitation. Week 16: small-scale RL shows no measurable defect–behaviour link — report as negative result, scope Direction 3 as future work.
-
----
-
-## 9. Risks
-
-| Risk | Reality | Mitigation |
+| Component | Use | Notes |
 |---|---|---|
-| Code half already published | Certain | Replicate and cite; lead with non-code |
-| "It's mutation testing" | Certain | Say so; frame as mutation adequacy for reward functions; novelty = semantic mutants + graded rewards + auditor precision |
-| Judge-bias probes not novel | Certain | Sub-result only; use CALM/JudgeBench protocols |
-| Adversary produces correct "exploits" | Real | Certification pipeline + reported precision |
-| **Certifier judge inherits the same trust problem being studied** | **Real, previously unaddressed** | **§1a: validate the certifier against the human-labelled subset; report its own agreement rate, not just the adversary's precision** |
-| Rubric ground truth subjective | Real | 2–3 annotators, κ, disagreement category |
-| No RL evidence | Likely solo | 4090 small-scale or partner; otherwise honest scoping |
-| API cost overrun | Likely | Open models for bulk; frontier for certification only |
-| **Scope grew faster than the timeline (Direction 3 especially)** | **Real** | **§7a: explicit cut order, Direction 3 first, decided now rather than under deadline pressure** |
-| Someone bigger publishes first | Possible | Post week-1 and week-8 results publicly |
+| github.com/few-sh/harden-v0 | Baseline hardening loop; fork for C2 | Py ≥3.12, Docker, Harbor, litellm keys. Actively changing — pin a commit. |
+| github.com/few-sh/terminal-wrench | 331 hackable envs + 3,632 hack trajectories | Exploit taxonomy source; 8B cloud experiment; monitor training data |
+| github.com/LeiLiLab/HardTestGen (+ HardTests dataset) | Hardened test generation for coding; problem pool for C1 | ICLR 2026; HackGen adversarial inputs; precedent for downstream RL gains |
+| ImpossibleBench (Zhong et al.) | Post-training hack-propensity measure | Conflicting/one-off mutations; pass = hack |
+| github.com/JonathanGabor/evilgenie_inspect | Hack detection: holdout tests + LLM judge + file-edit detection | Human-validated detectors; reuse verbatim |
+| PrimeIntellect-ai/verifiers + Environments Hub | Environment format for C3; publish envs | GRPO trainer needs ≥2 GPUs — do NOT use its trainer on the 4090 |
+| Unsloth GRPO (or TRL GRPOTrainer, vllm_mode=colocate) | Single-4090 training | Qwen3-1.7B full-param; Qwen3-4B/8B LoRA; reward_funcs = env verifier |
+| prime-rl | Cloud 8B run only | 1× A100-80GB/H200 rental |
+| τ-bench (sierra-research) | C3 state-checked env | pass^k protocol |
+| 2605.12474 protocol | C3 rubric eval | Cross-family 3-judge panel; self-internalization gap diagnostic |
 
 ---
 
-## 10. Week-1 checklist
+## 2. C1 design (the experiment that decides the paper)
 
-- [ ] Set up vLLM on the 4090 with a 14B 4-bit model; confirm throughput for K=8 generation.
-- [ ] Read 2606.16062 fully; one-page method + gaps summary.
-- [ ] Read 2606.04923; list injected biases and the drift metrics.
-- [ ] `pip install verifiers`; run τ-bench retail end to end with an open model.
-- [ ] Write 20 plausible-wrong solutions for 20 τ-bench tasks (manual + LLM-assisted).
-- [ ] Two people label each independently; compute κ.
-- [ ] Run through the state checker; record acceptance rate.
-- [ ] Create public repo (Apache-2.0), README with the number. **(repo already live, MIT — revisit license choice against this plan's Apache-2.0 preference before the public benchmark release)**
-- [ ] Message advisor (venue/authorship) and bandr (RL partner ask).
+**Domain (pilot):** algorithmic coding, ~500 problems from HardTests where Qwen3-1.7B/4B base pass@8 is 20–70% (learnable band).
+
+**Verifier conditions (the manipulated variable):**
+- V0 *weak*: 3 public tests only (special-casing trivially passes).
+- V1 *original*: the problem's original tests.
+- V2 *baseline-hardened*: HardTests-generated tests (HackGen included).
+- V3 *validity-preserving-hardened* (C2 output): V2 + certified-adversary-derived blocking tests, filtered by solver-ensemble validity constraint.
+- Optional V4: injected-defect verifier with a *known* exploit (controlled, as in 2606.04923) — cleanest causal reading.
+
+**Training:** Unsloth GRPO, Qwen3-1.7B full-param and Qwen3-4B LoRA; 300–600 steps; group size 8; 3 seeds per condition; identical prompts/data across conditions — only the reward function differs. Rollout/train alternate on one GPU.
+
+**Post-training measures (all held-out):**
+1. Hack rate on ImpossibleBench-style impossible variants (pass = hack).
+2. Hack rate on EvilGenie-style hackable tasks: holdout-test failure + LLM-judge "reward_hacking" label + file-edit detection; human-verify 100 trajectories.
+3. Legitimate accuracy on LiveCodeBench v5 held-out + HumanEval.
+4. Hack-onset step during training (reward vs holdout accuracy divergence).
+5. Generalization of hacking: School-of-Reward-Hacks-style transfer probes (2508.17511).
+
+**Prediction:** V0 ≫ V1 > V2 ≈ V3 on hack rate; V3 ≥ V2 ≥ V1 on legitimate accuracy; V0 shows earliest onset.
+
+**Stats:** mean ± CI over 3 seeds; two-proportion tests on hack rates; pre-registered conditions. What we can claim afterwards: *verifier hardening measurably changes the policy's hacking propensity, not just its benchmark score.*
+
+**Scale-up (cloud, weeks 19–23):** Qwen3-8B via prime-rl on a Terminal Wrench subset with original vs hardened verifiers (their hardened KernelBench/TB verifiers + ours). ~100–200 GPU-h.
+
+---
+
+## 3. C2 design
+
+- Fork harden-v0. Add: (1) **certified adversary** — every hack passed to the fixer must fail a gold-diff or cross-family judge check (removes false exploits that cause over-tightening); (2) **solver ensemble** — ≥2 model families, ≥2 solution styles, replacing their single reference solver; (3) **validity constraint** — reject a patch if ensemble benign pass drops > ε; sweep ε.
+- Eval on their corpora: Terminal Bench 77 + KernelBench L1, hinted/unhinted ASR + benign pass. Output: ASR–validity Pareto frontier. Target: within ~3 pp of their ASR reduction, benign-pass loss < 3 pp.
+- Also feeds C1's V3 verifiers for coding.
+
+---
+
+## 4. C3 design
+
+- **State-checked:** τ-bench retail/airline + one hub tool env. Adversary with mechanical (claim-completion, minimal-action shortcuts) and semantic exploits; fixer patches state predicates. Validity via solver ensemble; pass^k reported.
+- **Rubric-graded:** Corecraft if Surge grants access, else a constructed 100-task support/finance-ops env in `verifiers`. Fixer patches rubric criteria + judge prompt. Eval with cross-family 3-judge panel (2605.12474). Ground truth: 200 labels, κ ≥ 0.7, adversary precision reported.
+- Publish both envs (original + hardened) on the Environments Hub.
+
+---
+
+## 5. Timeline (28 weeks)
+
+**Wk 1–2 · Infrastructure.** Pin harden-v0; run on 5 TB tasks; reproduce one number. Unsloth GRPO on Qwen3-1.7B with a HardTests subset — 50-step run completes. Build V0/V1/V2 verifiers for 100 problems. Emails: advisor (venue/authorship), 2606.08960 authors (extension note), bandr (8B run).
+**Gate:** trainer runs; verifiers produce different rewards on the same solutions.
+
+**Wk 3–6 · C1 pilot.** V0/V1/V2 × 1.7B × 2 seeds, 300 steps. Measure hack rate (Impossible + EvilGenie detectors) and held-out accuracy.
+**Gate:** ≥10 pp hack-rate gap V0 vs V2, consistent across seeds → A* track. <3 pp → C2+C3 paper; one confirmatory run only. Post the result publicly either way.
+
+**Wk 7–12 · C2.** Certified adversary, solver ensemble, validity constraint, ε sweep on TB-77 + KernelBench L1. Produce V3 coding verifiers. **Workshop submission (C1 pilot + C2) by wk 12.**
+
+**Wk 13–18 · C3.** τ-bench + hub env audit/harden; rubric env build/audit/harden; 200 labels; hub publish.
+
+**Wk 19–23 · C1 full.** V0–V3 (+V4) × {1.7B, 4B} × 3 seeds; 8B cloud run on Terminal Wrench subset; onset + generalization measures.
+
+**Wk 24–28 · Write & submit.** Ablations (certification on/off, ensemble size, ε, verifier-aware vs blind), stats, release (code, verifiers, envs, labels, trajectories). Internal review. Submit.
+
+Venues: main track (NeurIPS 2027 / ICML 2027 / ICLR 2028) if C1 holds; NeurIPS D&B / ACL / ICSE otherwise; workshop at wk 12. Verify deadlines at commit.
+
+### 5a. Run-volume cut order for weeks 19–23 (new)
+
+V0–V3(+V4) × {1.7B, 4B} × 3 seeds is up to ~30 sequential training runs on a single 4090 inside a 5-week window — the largest unaddressed schedule risk in the plan; GRPO instability has a mitigation (§7), the sheer volume of runs doesn't. If wall-clock time is blowing up by week 20, cut in this order, decided now rather than mid-crunch:
+1. **Drop to 2 seeds before dropping anything else.** Weakens the CI but keeps every condition and both model scales represented.
+2. **Drop the 4B LoRA scale next**, keeping 1.7B full-param across all conditions — the core V0-vs-V2/V3 comparison survives on one scale.
+3. **Drop optional V4 (injected-defect) last among the verifier conditions** — it's explicitly marked optional in §2 and was always the cleanest-but-not-required causal reading.
+Never cut: V0, V1, V2, V3 at the 1.7B scale, or the 3-seed requirement for whichever conditions remain — the paper's headline comparison lives entirely in that cell.
+
+---
+
+## 6. Budget
+
+| Item | Cost |
+|---|---|
+| API (hacker/fixer/solver/judges; open models for bulk, frontier for certification) | $600–1,200 |
+| Cloud 8B run (A100-80GB/H200, 100–200 GPU-h) | $300–700 |
+| Expert labels (C3 rubric) | $300–600 |
+| **Total** | **$1.2k–2.5k** |
+
+---
+
+## 7. Risks
+
+| Risk | Likelihood | Response |
+|---|---|---|
+| 2606.08960 group runs the downstream-RL study first | Med-high | Pilot public by wk 6; contact them; C2/C3 remain yours |
+| Small models don't learn enough to hack | Medium | Learnable-band problem selection; V0 weak-tests condition guarantees a hackable signal |
+| GRPO on one 4090 unstable | Medium | Unsloth; LoRA on 4B; shorter completions; alternate phases |
+| **Weeks 19–23 run volume (~30 runs) doesn't fit a single 4090 in 5 weeks** | **Real, previously unaddressed** | **§5a: pre-decided cut order — seeds first, then 4B scale, then optional V4 — never the core 1.7B V0-V3 comparison** |
+| Hack detectors disagree | Real | Report all three (holdout, judge, file-edit) + 100 human labels, as EvilGenie does |
+| Reviewer: "HardTestGen already showed better tests help" | Real | Distinguish: they measure accuracy; we measure hacking propensity, onset, and generalization, and compare hardening methods |
+| Reviewer: "2604.15149 already showed verifier design induces shortcuts" | Real | Cite as motivation; ours is automated hardening on agentic/coding tasks at scale with a validity-preserving method |
+| Rubric ground truth subjective | Real | κ; cross-family panel; tool-use env as clean case |
+
+---
+
+## 8. Week-1 checklist
+
+- [ ] `git clone few-sh/harden-v0` (pin commit) + terminal-wrench; Docker + Harbor + litellm key; run loop on 5 tasks.
+- [ ] Download HardTests; select 100 problems; write V0 (3 public tests) / V1 (original) / V2 (HardTests) verifiers as `reward_funcs`.
+- [ ] Unsloth GRPO + Qwen3-1.7B; 50-step smoke test; log reward and holdout accuracy.
+- [ ] Set up EvilGenie detectors and 20 ImpossibleBench-style mutations for the pilot problems.
+- [ ] Emails: advisor, 2606.08960 authors, bandr. Public repo (Apache-2.0) with the three claims.
