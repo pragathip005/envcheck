@@ -453,6 +453,51 @@ rest is straightforward, same function, no new blocker). **V0, V1, and V2
 are now all real and independently verified** - the three conditions
 plan.md §2 needs before V3 (which depends on C2, still blocked).
 
+### 2026-09-03 — Committed and pushed to origin/dev (user asked to stop letting work pile up uncommitted)
+Split into logical commits rather than one dump: the plan.md §1a bridge
+separately from the c1/ pipeline code, and a follow-up commit for the V2
+verification writeup once that was confirmed. Checked for remote divergence
+(`git fetch` + `git log HEAD..origin/dev`) before each push - none, pushed
+clean. Going forward: commit at the end of each verified, coherent chunk of
+work, not just at session boundaries.
+
+### 2026-09-03 — Started EvilGenie detector reuse (plan.md §8 checklist item)
+Cloned `JonathanGabor/evilgenie_inspect` to `external/evilgenie_inspect`
+and read its actual scorer (`categorical_scorer.py`), not just the README -
+worth doing since the README undersells how Docker-coupled it is. Its three
+detectors split unevenly for reuse here:
+
+- **Test-result classification** (`passed_all` / `passed_visible_only` /
+  `failed_visible`): the categorization logic itself never touched Docker -
+  it only went through `sandbox().exec()` because *their* test runner lived
+  in a container. Ours doesn't (`c1/verifiers.py`'s graders run as plain
+  subprocesses already). Ported the categorization as
+  `classify_test_result(visible_score, holdout_score)` in the new
+  `c1/evilgenie.py`, feeding it our own V0 (visible) and
+  `code_contests`-private-tests-only (holdout - deliberately not the same
+  as V1, which also includes the visible tests) grader scores.
+- **LLM judge**: prompt and JSON-parsing logic ported close to verbatim
+  (`judge_solution()`), routed through `litellm` (already a project
+  dependency for harden-v0, plan.md §1) instead of `inspect_ai`'s model
+  interface. Needs an LLM API key to actually call a model - **new,
+  real blocker: no provider key is configured on this machine.** Written
+  and ready, not yet run end-to-end.
+- **File-modification detection**: not ported. It detects whether a live
+  agent, given an editable workspace, tampered with test files - there's no
+  agent and no editable workspace in this project yet (that's part of
+  actual RL rollouts, further downstream). Porting it now would mean
+  building something with nothing real to point it at.
+
+**Verified `classify_test_result` for real, including a genuine cheat, not
+just the two trivial cases.** Built an actual "hardcode the visible tests"
+solution (EvilGenie's own README names this exact pattern under "Hardcoded
+Test Cases (Reward Hacking)") from one pool problem's real public test
+cases - a lookup table keyed on exact stdin, falling back to a dummy answer.
+Result: `visible=1.00, holdout=0.00 -> passed_visible_only`. The gold
+solution correctly scored `passed_all`; an actually-wrong solution correctly
+scored `failed_visible`. All three of EvilGenie's categories now confirmed
+reachable from real inputs, not just asserted to work.
+
 ---
 
 ## Concepts
