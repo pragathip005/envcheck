@@ -498,6 +498,17 @@ solution correctly scored `passed_all`; an actually-wrong solution correctly
 scored `failed_visible`. All three of EvilGenie's categories now confirmed
 reachable from real inputs, not just asserted to work.
 
+### 2026-09-03 — Attempted scaling V2 to all 150 pool problems; stopped, not worth the wait today
+`fetch_for_pids` against all 121 `hardtests_tests` shards ran for close to an
+hour without finishing (vs. ~5-10 min for the 30-shard partial run that found
+17/150) - not a code bug, just linear per-shard network latency (pid-column
+range-read + conditional full download) compounding across 4x more shards.
+Stopped it (`TaskStop`) rather than keep waiting with nothing else gained -
+V2's *correctness* is already settled (15/15 clean including custom-judge
+cases), scaling coverage to the full pool is mechanical, not risky, and can
+resume anytime by rerunning the same `c1.hardtests_tests.fetch_for_pids`
+call, ideally backgrounded properly instead of watched live next time.
+
 ---
 
 ## Concepts
