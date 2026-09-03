@@ -4,7 +4,7 @@ Owners: Blitz + Pragathi · Advisor: Dr. Shylaja · Hardware: RTX 4090 (24 GB) +
 
 **v4 changes (after repo/paper verification):** C1 pilot moves from terminal environments to algorithmic coding (small models can't learn on Terminal Wrench tasks); training stack fixed to Unsloth GRPO on a single GPU; exact repos, datasets and detectors named; hypothesis support cited (2604.15149, HardTestGen).
 
-**Changed again, this pass:** one gap closed after review — an explicit cut order for the weeks 19–23 run volume (§5a), since up to ~30 training runs on a single 4090 in 5 weeks is the single largest unaddressed schedule risk in the plan. Everything else below is v4 as received. All named external repos/datasets (harden-v0, terminal-wrench, HardTestGen/HardTests, ImpossibleBench, evilgenie_inspect) were independently verified real and current before adopting this plan.
+**Changed again, this pass:** two gaps closed after review — an explicit cut order for the weeks 19–23 run volume (§5a), since up to ~30 training runs on a single 4090 in 5 weeks is the single largest unaddressed schedule risk in the plan; and a map from the already-built `envcheck` code to v4's C2/C3 components (§1a), since the v2→v4 rewrite dropped the envcheck architecture section (v2 §3) without saying what becomes of the eight commits already written against it. Everything else below is v4 as received. All named external repos/datasets (harden-v0, terminal-wrench, HardTestGen/HardTests, ImpossibleBench, evilgenie_inspect) were independently verified real and current before adopting this plan.
 
 ---
 
@@ -32,6 +32,25 @@ Fallback if C1 shows no effect: paper = C2 + C3 + C1 negative result → D&B / A
 | prime-rl | Cloud 8B run only | 1× A100-80GB/H200 rental |
 | τ-bench (sierra-research) | C3 state-checked env | pass^k protocol |
 | 2605.12474 protocol | C3 rubric eval | Cross-family 3-judge panel; self-internalization gap diagnostic |
+
+---
+
+### 1a. envcheck: what's already built and where it plugs in (new)
+
+Eight commits exist under `envcheck/` implementing v2's tool architecture (Task/Evidence/Verdict model, an adapter, two probes, an exploit pack, scoring, report + CLI) — written before the v2→v4 rewrite dropped that architecture section (v2 §3) and repointed the project at forking `harden-v0` instead. That code was never retargeted at v4. None of it touches C1 (which needs HardTests + the Unsloth GRPO training stack, neither of which exist in this repo yet). It maps onto C2/C3 like this:
+
+| Built | File | Maps to |
+|---|---|---|
+| Task/Evidence/Verdict/Grader model | `core/types.py` | Generic wrapper any grader can sit behind (harden-v0 verifiers, τ-bench state predicates, rubric judges) without new probe code per format. |
+| `gold_sanity` probe | `probes/gold_sanity.py` | Pre-flight check (gold passes, null fails). Cheap sanity gate to run against V0–V4 coding verifiers before spending GPU-hours training on them, and against τ-bench / the rubric env before C3 audits them. |
+| `hackability` probe + exploit pack v0 (E1/E5/E6/E9/E10) | `probes/hackability.py`, `exploits/pack_v0.py` | The hand-written, pre-LLM adversary v2 described as a placeholder. This is what C2's certified adversary (§3) is meant to extend, not duplicate — and it already has stand-ins for the mechanical/semantic families (E6 claim-completion, E9 rubric-parroting) C3 needs for τ-bench and the rubric env, which harden-v0 itself doesn't cover (coding-only). |
+| verifiers-format adapter | `adapters/verifiers_adapter.py` | Direct match to the Stack table's "PrimeIntellect-ai/verifiers + Environments Hub — Environment format for C3." Already does Rubric/State → Task. |
+| scoring (worst-wins verdict, Trust Score) | `scoring/types.py` | Not in v4's design as written. Optional: a cheap per-task KEEP/FIX/DROP diagnostic while auditing/hardening the τ-bench and rubric envs in C3, ahead of Hub publication — not required for any C1/C2/C3 measurement in this plan. |
+| report + CI demo | `report/`, `cli.py` | Not in v4's design as written. No current use identified; keep or drop later. |
+
+Still missing even for this reduced scope: certification (gold-diff / cross-family judge check on a candidate — C2 item 1), the solver ensemble (C2 item 2), the validity constraint / ε sweep (C2 item 3), and any state-checked exploit generator for τ-bench predicates (C3). None of that exists in the exploit pack yet — building it is C2/C3 work, not a rename of what's here.
+
+One measurement distinction to keep straight: the `hackability` probe measures whether a *fixed grader* accepts a *hand-crafted wrong answer* — a static, adversarial-search proxy. C1's hack rate measures whether a *trained RL policy* learns to exploit the grader — a behavioral, post-training result. They're complementary (the probe is a cheap pre-screen for candidate verifier conditions before burning a training run on them), not interchangeable — a KEEP verdict from this probe is not evidence for C1's "policy doesn't hack" claim.
 
 ---
 
