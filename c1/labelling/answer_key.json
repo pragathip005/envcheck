@@ -1,0 +1,86 @@
+{
+  "codeforces_1000_a-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1000_a"
+  },
+  "codeforces_1000_a-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1000_a"
+  },
+  "codeforces_1000_a-solver": {
+    "source": "solver_ensemble",
+    "problem_id": "codeforces_1000_a",
+    "model": "groq/openai/gpt-oss-120b"
+  },
+  "codeforces_1000_b-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1000_b"
+  },
+  "codeforces_1000_b-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1000_b"
+  },
+  "codeforces_1000_c-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1000_c"
+  },
+  "codeforces_1000_c-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1000_c"
+  },
+  "codeforces_1000_c-solver": {
+    "source": "solver_ensemble",
+    "problem_id": "codeforces_1000_c",
+    "model": "groq/openai/gpt-oss-120b"
+  },
+  "codeforces_1000_d-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1000_d"
+  },
+  "codeforces_1000_d-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1000_d"
+  },
+  "codeforces_1000_e-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1000_e"
+  },
+  "codeforces_1000_e-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1000_e"
+  },
+  "codeforces_1003_a-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1003_a"
+  },
+  "codeforces_1003_a-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1003_a"
+  },
+  "codeforces_1003_a-solver": {
+    "source": "solver_ensemble",
+    "problem_id": "codeforces_1003_a",
+    "model": "groq/openai/gpt-oss-120b"
+  },
+  "codeforces_1003_b-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1003_b"
+  },
+  "codeforces_1003_b-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1003_b"
+  },
+  "codeforces_1003_d-E1": {
+    "source": "E1",
+    "problem_id": "codeforces_1003_d"
+  },
+  "codeforces_1003_d-E5": {
+    "source": "E5",
+    "problem_id": "codeforces_1003_d"
+  },
+  "codeforces_1003_d-solver": {
+    "source": "solver_ensemble",
+    "problem_id": "codeforces_1003_d",
+    "model": "groq/openai/gpt-oss-120b"
+  }
+}

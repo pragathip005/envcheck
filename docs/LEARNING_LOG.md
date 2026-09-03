@@ -631,6 +631,62 @@ actually passed through on every call, so a future refactor can't silently
 drop either and reintroduce the 25-minute failure mode. 68/68 passing
 across the whole project.
 
+### 2026-09-03 — Started the human-labelling pilot (the un-started requirement, not more tooling)
+Deliberately not another probe: 300 labelled items with reported κ is a
+stated evidentiary requirement for the paper and hadn't been touched.
+Built `c1/labelling/` - `generate.py` (`build_labelling_batch`,
+`make_labels_template`), `kappa.py` (Cohen's κ, hand-implemented rather than
+pulling in scikit-learn for one function), and `docs/labelling_protocol.md`
+(the actual CORRECT/WRONG/UNSURE question + decision rule, so two people
+answer the same question instead of two different ones).
+
+**Candidates are never executed to build this batch** - `c1/verifiers.py`'s
+own docstring says its graders aren't safe against untrusted/model-generated
+code without a real sandbox, which this machine doesn't have. Human
+labelling reads code, it doesn't need to run it, so the batch generator
+sidesteps that constraint instead of working around it - real design
+decision, not an oversight.
+
+Built a small local pool first (`target_count=8` - this laptop had none of
+the cached pool data, being a separate machine from the one that built the
+150-problem pool). **That build took ~20 minutes despite being tiny** - not
+a hang, confirmed by checking `TaskOutput` mid-run and watching it complete
+successfully (8/8 validated, 73% yield) - just slow, per an "unauthenticated
+HF Hub requests" warning throttling the dataset streaming/join step, which
+dominates regardless of target_count.
+
+**The batch itself needed a second real fix.** First generation run: 16/16
+exploit-pack items (E1/E5, deterministic, no API calls) but only 3/8 real
+solver-ensemble attempts - 5 Groq calls failed even with
+`run_solver_ensemble`'s existing `num_retries=3`+`timeout=30.0`. Debugged by
+reproducing one failing call in isolation right after the batch run: it
+succeeded immediately. Same diagnosis as yesterday's Gemini 503, different
+provider: `num_retries` handles one call's own transient error, not
+sustained load from firing 8 calls back-to-back with zero pacing. Added a
+3-second delay between problems in `build_labelling_batch`'s loop -
+improved to 4/8 on rerun, still not 8/8. Diminishing returns against a free
+tier's actual throughput ceiling - not chasing further at this batch size;
+a dropped solver item is skipped, not faked, so the 20-item batch (16
+exploit + 4 solver) that shipped is honest, just less balanced toward real
+model attempts than intended. Worth more pacing or a paid tier if this
+matters more once labelling scales to the full ~300-item requirement.
+
+**Separately, both `test_solver_ensemble_live.py` tests that call Gemini
+failed twice in a row tonight** (`gemini/gemini-3.6-flash` returning empty
+after retries+timeout, same shape as yesterday's 503) - almost certainly
+Gemini's free tier under real throttling from cumulative session usage, not
+a regression in `solver_ensemble.py` itself (unchanged tonight) or anything
+in this session's actual labelling work (which used Groq only, deliberately,
+for exactly this reason). Noted rather than chased - same "live APIs are
+genuinely flaky, that's real information not a bug to eliminate" stance as
+before. 76/78 passing; the 2 failures are both this known, external,
+Gemini-specific flakiness.
+
+Created `labels_blitz.json` / `labels_pragathi.json` templates (20 items
+each, all `null`) - actual labelling is real human judgment work for
+Blitz + Pragathi to do, not something to automate away, per
+`docs/labelling_protocol.md`.
+
 ---
 
 ## Concepts
