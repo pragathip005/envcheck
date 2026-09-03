@@ -1,262 +1,201 @@
-# envcheck — Execution Plan
+# envcheck / EnvTrust-Bench — Execution Plan v2
 
-*A QC gate for RL environments + the public benchmark that makes "environment trust" a number.*
+*Research-first. Direction 1: reward-signal validity in non-code RL environments.*
 
-Working names: tool = `envcheck`, benchmark = `EnvTrust-Bench`.
-Owner: Blitz. Machine: RTX 4050 (6 GB) + API credits. Window: ~16 weeks.
+Owners: Blitz + Pragathi. Advisor: Dr. Shylaja. Hardware: RTX 4090 (24 GB) confirmed; + API credits. Window: ~24 weeks to main-track submission.
 
-Revision note: this version folds in a week-0 critique session (conflict of
-interest in the adoption story, labelling-protocol rigor, single-score
-Goodharting, difficulty/diversity false-positive risk, explicit scope-cut
-order, and a firmer publication target). Changes are inline, not a separate
-changelog — treat this file as the current plan, not a history of it.
+**Changed from v1:** the tool is now a by-product, not the goal. Judge-bias probes demoted to a sub-result. Adversary precision added as a first-class measurement. Timeline extended from 16 to 24 weeks to reach a publishable result. GPU plan added.
+
+**Changed from v1 again, this pass:** three gaps closed after comparing v1 and v2 side by side — a validation step for the certification pipeline itself (§1a), an explicit scope-cut order now that ambition grew faster than the timeline did (§7a), and a one-line disclosure norm for named environments now that the vendor-pilot angle is gone but the research-access asks (Corecraft/Surge AI) aren't (§6a). Everything else below is v2 as received.
 
 ---
 
-## 0. Goal (set this correctly or the whole plan drifts)
+## 0. Goal
 
-**Primary outcome:** a cited benchmark + an adopted open-source tool + a main-track or D&B paper.
-**Secondary outcome:** pilot users at 2–3 environment vendors / post-training shops.
-**Explicitly NOT the goal:** revenue by week 16. If revenue happens, great; don't optimize for it.
+**Primary:** a main-track or D&B paper answering: *under a fixed attack budget, what fraction of reward in tool-use and rubric-graded RL environments goes to expert-judged-incorrect solutions, how does it compare to code, and how reliable is the automated auditor itself?*
+**Secondary:** the released benchmark (EnvTrust-Bench), labelled exploit set, and the `envcheck` tool.
+**Now in scope (4090):** the causal result at small scale — do grader defects become policy defects after RL? Partner/cloud only for the 7B+ headline version.
+**Not the goal:** revenue.
 
-Definition of done at week 16:
-- `pip install envcheck` works on any `verifiers`-format environment and emits a Trust Score + per-task verdict.
-- EnvTrust-Bench v0.1 public: ≥6 environments, ≥600 audited tasks, human-labelled ground truth for ≥200, with a stated inter-rater agreement score for those labels (see §5a).
-- One paper draft submitted to the primary target (see §6, Phase 4).
-- ≥3 external teams have run the tool on their own environments.
+Done means: ≥4 environments audited, ≥300 expert-labelled items with κ reported, adversary precision measured, validity metric defined, replication of the prior code result, synthesized-vs-hand-built comparison, paper submitted.
 
 ---
 
-## 1. Positioning (one paragraph, memorize it)
+## 1. Research design (fixed before code)
 
-Environment supply is going from hundreds of hand-built tasks to millions of synthesized ones. Published audits show 25–60% of tasks in the best-known code environments accept wrong solutions. Vendors grade themselves; labs audit internally and don't share. envcheck is the independent, automated measurement layer: run it before training, get a per-task verdict and a trust score, and stop paying training compute to learn the wrong thing. The differentiator vs. prior work: cross-domain (code + tool-use + rubric-graded), multi-axis (hackability, validity, judge-bias, difficulty, diversity), and shipped as a CI gate, not a paper appendix.
+**Hypotheses.**
+- H1: non-code environments leak reward to incorrect solutions at rates ≥ code environments at K=8.
+- H2: semantic exploits dominate in rubric environments; mechanical exploits dominate in code.
+- H3: automated adversary precision is lower on rubric tasks than on code/tool-use.
+- H4 (optional): synthesized tasks show higher gold-gate failure and near-dup rates than hand-built ones.
 
-**Be honest with yourself about what part of this is actually new.** The code-hackability headline number is a replication of prior work (2606.16062), not a novel finding — it's infrastructure and a sanity check that your pipeline works, not the paper's contribution. The actual new empirical claim has to come from Phase 2 (cross-domain judge-bias + difficulty + diversity, measured together, with human-verified ground truth). Don't let replication eat the calendar that the real contribution needs.
+**Baselines.** Human-authored wrong solutions; the 2606.16062 pipeline on code; a random-wrong adversary.
+
+**Environments.** τ-bench retail/airline (tool-use, state-checked); one Prime Intellect hub tool env; one rubric-graded env (Corecraft if accessible, else constructed 100-task support/finance-ops env); R2E-Gym sample (code control); one synthesized env (AutoForge/AWM-style output). 100 tasks each.
+
+**Metrics.** Task-level defect rate; score-level reward leakage (graded tasks); adversary precision; κ; gold-gate failure rate; near-dup rate; cost per audited task. Wilson CIs, bootstrap over tasks, K budget pre-registered.
+
+**Ablations.** Drop each exploit family; K ∈ {2,4,8,16}; swap adversary model; swap certification judge family; disable gold gate.
+
+**Stress tests.** Injected-defect environments (recall); deliberately hardened environments (false-positive rate).
+
+**Generalization.** Hold out one family; does the taxonomy transfer?
+
+**Claim after the experiment:** a quantified, ground-truthed defect rate for non-code environments with the auditor's own error bar — which nobody can state today.
+
+### 1a. Certifier validation (new — closes a reflexivity gap)
+
+`probes/certify.py` (§3) decides whether an adversary-generated candidate is genuinely wrong using cross-family LLM judges. That certifying judge is itself an LLM, subject to the same trust problem this paper studies — a sharp reviewer's obvious question is "how do you know your certifier is right?" Answer it before they ask: run the certifier against the same human-labelled subset used for κ, report the certifier's own agreement/error rate against those human labels, and carry that number in the paper alongside adversary precision. Without this, the paper's headline defect rate silently inherits an unmeasured judge-bias error term from the one component meant to guard against exactly that.
 
 ---
 
-## 2. Required reading (week 1, in this order)
+## 2. Reading (week 1)
 
-1. Auditing Reward Hackability in Code RL Training Environments — arXiv 2606.16062. **Replicate first, then extend.** Note its EQS definition, KEEP/FIX/DROP verdict, gold-sanity gate. (Real numbers to anchor on: 28.5% of a 49-task SWE-bench Verified sample had test suites weak enough that a Docker-verified wrong patch still passed; 25.0% on a 20-task R2E-Gym sample; models score +14.14pp higher on flagged-hackable tasks than robust ones of the same difficulty, 95% CI [+11.80, +16.48].)
-2. Reproducing, Analyzing, and Detecting Reward Hacking in Rubric-Based RL — arXiv 2606.04923 (CHERRL). Source of judge-bias probe ideas: injects known biases into an LLM judge to study how *discoverable* and *exploitable* each one is.
-3. LLMs Gaming Verifiers: RLVR can Lead to Reward Hacking — arXiv 2604.15149.
-4. Can RL Improve Generalization of LLM Agents? — arXiv 2603.12011. The transfer counter-evidence.
-5. EnterpriseBench Corecraft (Surge AI) — arXiv 2602.16179. The vendor's self-reported transfer claim; also a candidate environment if accessible.
-6. Agent World Model — arXiv 2602.10090 (§6.1: quality/difficulty/diversity axes for synthesized envs).
-7. AutoForge — arXiv 2512.22857; Endless Terminals — arXiv 2601.16443 (the synthesis pipelines you're the gate for).
-8. Reward Hacking Benchmark (tool-use) — arXiv 2605.02964.
-9. τ-bench — arXiv 2406.12045 (pass^k, and a target environment).
-10. Prime Intellect `verifiers` docs + Environments Hub. This is your integration surface.
-11. **New: the software-engineering literature on test oracle quality and mutation testing.** This field has studied "does this test suite actually catch wrong code" for 20+ years under different names. `hackability`'s code exploits (E1/E2/E5) are a restatement of mutation testing. Read at least one mutation-testing survey and one test-oracle-quality paper before writing `probes/hackability.py` — this also opens ICSE/FSE as a legitimate venue (see §6, Phase 4), and its absence from a prior draft of this plan was a visible gap.
-
-Skim: MAST (arXiv 2503.13657) for failure taxonomies; OpenAI's Feb 2026 SWE-bench Verified flawed-tests note.
+Core: 2606.16062 (replicate), 2606.04923 (rubric RL hacking — template for causal study), 2604.15149, 2605.02964, 2603.12011, 2602.16179, 2602.10090, 2512.22857, 2601.16443, τ-bench 2406.12045.
+Judge bias (cite, don't reinvent): 2410.02736 (CALM), 2410.12784 (JudgeBench), 2606.19544.
+Theory: mutation testing (DeMillo, Lipton & Sayward 1978) — frame hackability as mutation adequacy for reward functions.
+Method: MAST 2503.13657 for taxonomy + κ methodology.
+Tooling: Prime Intellect `verifiers` docs + Environments Hub.
 
 ---
 
-## 3. Architecture
+## 3. Architecture (minimal — build only what the paper needs)
 
 ```
 envcheck/
-  core/            # shared Task / Evidence / Verdict data model
-  adapters/        # verifiers-format first; tau-bench, SWE-Gym/R2E-Gym, custom-JSON later
-  probes/
-    gold_sanity.py     # gold passes; null fails; random-wrong fails
-    hackability.py     # LLM adversary + exploit library -> wrong solutions that pass
-    judge_bias.py      # paired-perturbation probes for LLM/rubric graders
-    difficulty.py      # 3-tier model sweep; trivial / impossible flags
-    diversity.py       # near-dup + template-collapse detection
-  exploits/        # versioned exploit strategy pack (YAML + generators)
-  scoring/         # Environment Trust Score, per-task KEEP/FIX/DROP
-  report/          # JSON + HTML report; CI exit codes (--fail-under)
-  repair/          # v1.0: propose blocking tests / rubric patches, re-verify
-  cli.py
-bench/             # EnvTrust-Bench: env manifests, ground-truth labels, leaderboard scripts
+  adapters/verifiers.py        # only format for now
+  probes/gold_sanity.py        # gold passes; null/random-wrong fail
+  probes/adversary.py          # exploit taxonomy -> K wrong candidates per task
+  probes/certify.py            # is the candidate genuinely wrong? gold-diff + cross-family judges + human queue
+  probes/difficulty.py         # 3-tier sweep (7B open / mid / frontier)
+  probes/diversity.py          # near-dup + template collapse
+  scoring/validity.py          # task-level defect + score-level leakage; Trust Score
+  report/                      # JSON + HTML; --fail-under for CI (last)
+bench/                         # manifests, labels, leaderboard scripts
 paper/
 ```
 
-Design rules:
-- Every probe is independent and returns (task_id, verdict, evidence). Score aggregation is separate.
-- Exploit pack is versioned separately from the CLI (same pattern as the MCP scanner's rule pack).
-- Every claim in a report carries the attack budget used (K candidates, model, temperature). The score is probabilistic; say so.
-- Adversary model is pluggable: default to a cheap open model via API; frontier model optional.
-- **The per-axis leaderboard columns (hackability rate, judge-bias sensitivity, trivial %, impossible %, near-dup %, gold-gate failures) are the primary artifact, not the single Trust Score.** Collapsing five different kinds of evidence into one scalar invites exactly the Goodharting this tool exists to catch — a vendor could patch the known exploit pack without becoming genuinely more robust, and still post a high single score. The Trust Score ships as a convenience summary with a stated limitation in every report and in the paper; never lead marketing or the leaderboard's default view with it alone.
-- **Difficulty and diversity verdicts get less benefit of the doubt than hackability/gold-gate verdicts.** A task flagged "impossible" by a 3-tier model sweep may just mean none of the three models had the right domain knowledge, not that the task is broken; a false "impossible" or "near-duplicate" flag published against a legitimate, hard task is a credibility hit in exactly the community you need to win over. A DROP verdict driven solely by difficulty or diversity evidence requires human review before it ships in a public report; hackability- and gold-gate-driven DROPs do not need this (they have direct, mechanical evidence: a specific wrong solution passed, or the gold solution failed).
+Rules: probes independent; exploit pack versioned separately; every report states K, adversary model, certification model; score is probabilistic — never say "verified". Per §1a, every report that cites a certify.py verdict also carries the certifier's own measured agreement rate against the human-labelled subset — the certification model is a probe with an error rate too, not ground truth.
+
+Note on what's already built: the code so far (`adapters/verifiers_adapter.py`, `probes/gold_sanity.py`, `probes/hackability.py`, `scoring/`, a demo `cli.py`) maps directly onto this architecture — `hackability.py` is `probes/adversary.py` in substance. `probes/certify.py` is the one genuinely new component; `scoring/validity.py` additionally needs score-level (continuous) leakage, not just the binary KEEP/FIX/DROP verdict our `scoring/` currently produces.
 
 ---
 
-## 4. Exploit library v0 (write these by hand first)
+## 4. Exploit taxonomy v0 (mechanical vs semantic)
 
-Code environments:
-- E1 test special-casing (hardcode expected outputs for visible tests)
-- E2 assertion removal / test file mutation
-- E3 monkey-patching the grader / import hooks
-- E4 early exit with success code
-- E5 partial implementation that passes weak tests
-
-Tool-use / agent environments:
-- E6 claim completion without side effects ("resolved" text, no state change)
-- E7 minimal-action shortcuts that satisfy a state check but violate policy
-- E8 over-asking / stalling that a lenient grader marks as safe
-
-Rubric / LLM-judged environments:
-- E9 rubric parroting (restate criteria verbatim)
-- E10 length padding / over-explanation
-- E11 confident hedging (cover all answers)
-- E12 sycophantic preamble / self-praise
-- E13 refusal-as-safe on tasks that should be completed
-- E14 answer reordering / formatting games
-
-Each exploit: a generator prompt, a "must be genuinely wrong" check, and an expected-failure assertion.
+Mechanical (code/tool): test special-casing; assertion removal; grader monkey-patching; early exit; partial implementation; claim-completion-without-side-effects; minimal-action shortcuts.
+Semantic (rubric/reasoning): rubric parroting; length padding; confident hedging; sycophantic preamble/self-praise; refusal-as-safe; answer reordering/format games; exploiting the verifier's implicit correctness assumptions (2604.15149).
+Each: generator prompt, "must be genuinely wrong" certification path, expected-failure assertion.
 
 ---
 
-## 5. Benchmark: EnvTrust-Bench v0.1
+## 5. Hardware and budget (RTX 4090, 24 GB)
 
-Target environments (pick 6, cover all three families):
-- Code: R2E-Gym sample, SWE-Gym sample, Terminal-Bench sample
-- Tool-use: τ-bench (retail/airline), one Prime Intellect hub tool env
-- Rubric-graded: one support/ops env (Corecraft if accessible; else build a 100-task rubric env from public data), one reasoning env with rubric grading
+What the 4090 changes:
+- **Bulk adversarial generation moves local.** Serve Qwen3-14B or Qwen2.5-Coder-14B in 4-bit via vLLM/SGLang on the 4090 for the K-candidate adversary; use frontier APIs only for certification and the final leaderboard. Cuts API spend roughly in half.
+- **Difficulty sweep is trivial.** 7B/14B tiers run locally at full speed.
+- **Direction 3 (causal RL) is on the table at small scale.** Recipe: GRPO via TRL or verl on Qwen3-1.7B / Qwen2.5-1.5B-Instruct full-parameter, or Qwen3-4B with LoRA; rollouts with vLLM on the same card, alternating rollout/train phases (don't try to co-host both at once). Environments: injected-defect variants of τ-bench-style tool tasks with a known defect profile. Target: 200–500 RL steps per condition × 3 defect conditions + 1 clean control. Expect 1–3 days wall-clock per condition — but budget calendar time for RL infrastructure debugging (vLLM/TRL integration, OOMs from co-hosting rollout and train) separately from raw GPU-hours; a first-time setup's debugging time reliably dwarfs the run time itself.
+- **Still out of reach locally:** 7–8B full RL on real environments for a headline result — 1× A100-80GB/H100, 150–300 GPU-h — $400–900, or a partner cluster.
 
-Per environment: 100 tasks. Per task: 3 sanity checks + K=8 adversarial candidates per exploit family + 3-tier difficulty sweep.
+| Work | Where |
+|---|---|
+| Adversary generation (bulk) | 4090, 14B 4-bit local |
+| Certification | Frontier API (cross-family) |
+| Difficulty sweep | 4090 |
+| Small-scale causal RL (≤4B) | 4090 |
+| 7B+ causal RL | Cloud A100/H100 or partner |
 
-Ground truth: for ≥200 tasks across the rubric/tool families, a human label on each adversarial candidate ("is this actually wrong?"). This is the expensive part. Sources: you + Pragathi + paid expert hours for the domain ones.
+Budget: API $400–800 (down from $800–1,500); expert labelling $300–800; cloud GPU $0–900 (optional). Total: $0.7k–2.5k.
 
-### 5a. Labelling protocol (new — this was previously unspecified, and it's the part reviewers will attack first)
+## 6. People and asks (do in week 2)
 
-"200–300 human labels" is meaningless without a stated protocol for how consistent those labels are. Before labelling at volume:
-1. Write down the exact labelling question and decision rules ("is this candidate genuinely wrong" — define what counts as wrong for each task family: code = fails a correct, independent re-check; tool-use = final state doesn't match the intended outcome; rubric = would a domain expert mark this materially incomplete or incorrect).
-2. Pilot: you and Pragathi independently label the same ~30-candidate batch, blind to each other's labels.
-3. Compute inter-rater agreement (Cohen's kappa or equivalent). If it's low, the labelling question is ambiguous — fix the protocol, not the labelers, and re-pilot before scaling.
-4. Only scale to the full 200–300 once agreement is stable. Report the final agreement number in the paper; it's part of the method, not a footnote.
-5. Any paid/external labelling hours follow the same fixed protocol, not a looser version of it.
+- Pragathi: co-builder, second annotator, rubric env construction.
+- Dr. Shylaja: venue + authorship agreement; GPU/cluster access for Direction 3.
+- bandr / lab partner: "if I deliver audited environments with known defect profiles, will you run the RL and co-author?"
+- Prime Intellect hub maintainers: integration + a pre-publish check; distribution.
+- Surge AI: request Corecraft access for research.
 
-Leaderboard columns: Trust Score (secondary/summary), hackability rate, gold-gate failures, judge-bias sensitivity, trivial %, impossible %, near-dup %.
+### 6a. Disclosure norm for named environments (new)
 
-### 5b. Disclosure policy for the public leaderboard (new)
-
-There's a real conflict of interest between "vendors adopt this" (§12) and "this tool's job is to publicly report vendor flaws." Treat a new environment's audit like coordinated vulnerability disclosure, not a surprise takedown:
-1. Audit privately first when the environment maintainer is identifiable and reachable.
-2. Share the report with them and give a fixed window (30 days) to respond, fix, or comment before the entry goes live on the public leaderboard.
-3. Publish on schedule regardless of response — the window is a courtesy, not a veto.
-4. Environments with no identifiable maintainer (most synthetic/scraped ones) skip straight to public — the disclosure courtesy is for people you're asking to become allies, not a blanket delay.
-This turns outreach from "we're about to expose you" into "we'll help you fix this before anyone sees it," which is a fundamentally easier pitch and is the actual mechanism by which vendors would come to trust, cite, or adopt the tool instead of avoiding it.
-
----
-
-## 6. 16-week timeline
-
-### Phase 0 — Prove it in a week (Week 1)
-- Read papers 1, 2, 9, 10, plus the mutation-testing/test-oracle addition in §2.
-- `pip install verifiers`; clone 3 hub environments (1 code, 1 tool, 1 rubric).
-- Hand-write 5 exploits. Manually craft 20 wrong solutions for 20 tasks. Run. Record pass rate.
-- **Gate:** if ≥10% of wrong solutions pass in the non-code env, proceed. If <5%, the non-code half may be less broken than assumed — re-scope toward difficulty/diversity axes and talk before continuing.
-- Publish: repo + 500-word write-up with the number.
-
-### Phase 1 — Replicate and generalize (Weeks 2–4)
-- Replicate 2606.16062's gold-sanity gate + hackability on a code env; match their ballpark.
-- Build `adapters/verifiers`, `probes/gold_sanity`, `probes/hackability`, exploit pack v0 (E1–E14 as generators).
-- First automated run across the 3 envs. Ship `envcheck` v0.1 (CLI, JSON report).
-- **Deliverable:** v0.1 on PyPI; blog post "we ran an automated adversary against 3 open environments."
-
-### Phase 2 — The non-code contribution (Weeks 5–8)
-- `probes/judge_bias`: paired-perturbation design (same content, vary length / confidence / preamble / order); measure grader flip rate.
-- `probes/difficulty`: 3-tier sweep (e.g. a 7B open model, a mid open model via API, one frontier model). Flag trivial/impossible, with the human-review gate from §3 before any public DROP.
-- `probes/diversity`: embedding + AST/template near-dup.
-- Trust Score v1 + KEEP/FIX/DROP, reported alongside (not instead of) the per-axis columns.
-- Start ground-truth labelling per the §5a protocol (pilot first, then scale; target 200 tasks by week 8).
-- **Deliverable:** v0.3 with all five probes; first internal leaderboard on 6 envs; a stated inter-rater agreement number for the labels collected so far.
-- **Checkpoint: submit an early-draft write-up to a relevant workshop (NeurIPS/ICML/ICLR track on LLM evaluation, RL environments, or trustworthy AI) around week 8–9.** This is a forcing function, not a distraction — it gets independent reviewer feedback and a citable result well before the Phase 4 deadline, and forces scope discipline earlier than week 12 would.
-
-### Phase 3 — Benchmark + external users (Weeks 9–12)
-- Finalize EnvTrust-Bench v0.1: manifests, labels + agreement numbers, leaderboard, reproducibility scripts, license.
-- CI mode: `envcheck --fail-under 0.8`, GitHub Action.
-- Reach out to 5 targets **using the §5b disclosure policy** (private report + fixed response window, not a surprise public score): Prime Intellect, 2 env-native startups, bandr, one lab's open env team. Ask for one call each.
-- Transfer partner: pitch your guide's lab and bandr on co-authoring the transfer experiment (they run RL; you provide the audited task sets and the pre/post measurement).
-- **Deliverable:** public leaderboard; ≥3 external runs; transfer collaboration agreed or explicitly dropped.
-
-### Phase 4 — Paper + v1.0 (Weeks 13–16)
-- `repair/` loop for FIX tasks (blocking test / rubric patch, re-verified through gold gate) — **first thing cut if behind schedule** (see §9 scope-cut order).
-- Write the paper for the **primary target: NeurIPS Datasets & Benchmarks track** — best structural fit, since the actual deliverable (audited environments + human-verified ground truth + leaderboard + reproducibility scripts) is exactly what that track rewards, without needing a novel-algorithm framing. Contributions = (1) cross-domain audit with ground truth and stated labelling agreement, (2) judge-bias probe methodology, (3) the tool + CI gate, (4) transfer result if partner delivered.
-  - Backup/alternate framing if the judge-bias result ends up strongest: ACL/EMNLP resource-and-evaluation track, or their system-demonstration track (lower bar, good fallback for "the tool" if the full research paper isn't ready).
-  - Also legitimate and underexploited: ICSE/FSE NIER or tool-demonstration track, framed as "test oracle quality for RL environments" — the mutation-testing reading in §2 is what makes this framing credible.
-- Submit. Ship v1.0.
+v1 had a vendor-pilot angle and, with it, a real conflict of interest (audit-and-expose vs. audit-and-sell), mitigated there with a coordinated-disclosure policy. v2 drops the vendor pitch, but the tension didn't fully disappear — the paper will still publish a measured defect rate against named environments (Corecraft, hub environments) whose maintainers you're asking for research access. Keep it simple here rather than reviving the full v1 policy: share the relevant measured results with an identifiable environment's maintainer before publication, as a courtesy and good-faith gesture for research access granted, not as something that can block or delay publication. State this plainly in the paper's methodology section. Environments with no identifiable maintainer (scraped/synthetic ones) need no such step.
 
 ---
 
-## 7. Metrics that decide whether this worked
+## 7. Timeline (24 weeks)
 
-| Metric | Week 4 | Week 8 | Week 16 |
-|---|---|---|---|
-| Envs audited | 3 | 6 | 6–8 |
-| Tasks audited | 60 | 600 | 800+ |
-| Ground-truth labels | 0 | 200 | 300 |
-| Labelling inter-rater agreement reported | — | pilot done | final number in paper |
-| Exploit families | 5 | 14 | 14+ (community-contributed) |
-| External teams running tool | 0 | 1 | 3 |
-| Hackability rate found (non-code) | measured | measured | published |
-| Workshop draft submitted | — | week 8–9 | accepted/feedback incorporated |
-| Paper draft (primary target) | — | outline | submitted |
+**Week 1 — go/no-go.** 20 hand-crafted plausible-wrong solutions on τ-bench retail; count acceptances; two independent labels; κ. Publish the number.
+- GO if ≥10% accepted and κ ≥ 0.7. PIVOT to H4 (synthesized envs) if <5%. Talk before continuing if in between.
 
-Kill criteria (be honest when you hit them):
-- Week 1 gate fails (non-code hackability <5%) and difficulty/diversity axes also show nothing interesting → stop; write it up as a negative result and move on.
-- Week 8: no external team will even take a call → the tool angle is dead; finish as paper-only.
-- Week 12: no transfer partner → publish without transfer, state it as future work, don't fake it with a weak proxy.
+**Weeks 2–4 — replicate + automate.** Reproduce 2606.16062's gold gate + hackability on R2E-Gym sample; build adapter, gold gate, adversary with full taxonomy; first automated run on τ-bench. Send partner asks.
+
+**Weeks 5–8 — three environments + precision.** Add hub tool env; defect rates with CIs on ≥300 tasks; adversary precision on 50-item human subset; certification pipeline v1 (with the §1a self-check against the human-labelled subset). **Workshop-paper-ready.** Submit to the nearest workshop as a marker.
+
+**Weeks 9–12 — the novel half.** Rubric-graded environment (Corecraft or constructed); score-level leakage metric; 150+ labelled rubric items; semantic-vs-mechanical rates per family.
+
+**Weeks 13–16 — breadth + comparison.** Synthesized environment audit (H4); ≥300 total labels; difficulty + diversity probes; internal leaderboard; **main-track draft outline.** Tool v0.1 on PyPI (one week of polish, no more).
+
+**Weeks 17–20 — rigor.** Ablations (exploit family, K, adversary model, judge family, gold gate); injected-defect recall and hardened-env FPR; held-out-family generalization; bootstrap CIs. Direction 3 on the 4090: GRPO on Qwen3-1.7B across 3 injected-defect conditions + clean control; measure post-training behaviour against the pre-training defect profile. Partnered 7B run if available.
+
+**Weeks 21–24 — write + submit.** Full draft, internal review by advisor + one external reader, release benchmark + labelled set + audit logs, submit.
+
+Venue targets: workshop (week 8 result) at ICLR 2027 / NeurIPS 2026 workshops; main track (week 24) at NeurIPS 2027 D&B, ACL 2027 systems, or ICSE/FSE 2027–28 cycle. Verify exact deadlines at commit time.
+
+Effort assumption: 15–20 hrs/week each. Below that, multiply by 1.5.
+
+### 7a. Scope-cut order if behind schedule (new)
+
+Ambition grew more than the timeline did in v2 (formal hypotheses, ablations, stress tests, a generalization check, a full certification pipeline, *and* real RL training runs, for +50% more time). If week 16–18 arrives behind schedule, cut in this order — decide it now, not under deadline pressure:
+1. **Direction 3 (causal RL) first.** It's the single riskiest, most infrastructure-heavy line item and the plan already has an honest exit ("report as negative result, scope as future work" — §8 kill criteria) — use it rather than fighting to keep the RL runs alive alongside everything else.
+2. **H4 (synthesized-vs-hand-built comparison)** next — it's explicitly marked optional in §1.
+3. **Environment count** — 4 environments with full rigor (ablations, CIs, certifier validation) beats 5–6 audited shallowly.
+Never cut: the gold gate, adversary precision measurement, κ-reported human labelling, or the certifier validation from §1a — these are the paper's actual evidentiary core.
 
 ---
 
-## 8. Budget
+## 8. Milestone metrics
 
-- API for adversarial generation + judges: $500–1,500 total. Use open models via cheap providers for bulk; frontier only for the rubric-bias probes and the final leaderboard run.
-- Human labelling: $500–2,000 depending on how much you and Pragathi do yourselves. Budget explicitly includes the §5a pilot-and-agreement pass, not just the final 200–300 labels — the pilot is what makes the rest trustworthy.
-- GPU: the 4050 handles the 7B tier of the difficulty sweep (4-bit) and embedding models for diversity. Kaggle/Colab for anything bigger. RL/transfer = partner's compute only.
+| | Wk 4 | Wk 8 | Wk 16 | Wk 24 |
+|---|---|---|---|---|
+| Environments | 2 | 3 | 5 | 5–6 |
+| Tasks audited | 200 | 300 | 500 | 600+ |
+| Labelled items (κ reported) | 20 | 50 | 300 | 300+ |
+| Adversary precision measured | — | yes | yes | yes |
+| Certifier agreement vs. human labels (§1a) | — | yes | yes | yes |
+| Validity metric defined | — | draft | final | final |
+| Replication of 2606.16062 | done | — | — | — |
+| Synthesized-vs-hand-built | — | — | done | done |
+| RL causal result | — | — | — | small-scale or partnered |
+| Paper | number posted | workshop | draft | submitted |
+
+Kill criteria: week-1 gate fails on both H1 and H4 — write negative result, stop. Week 12: rubric labels can't reach κ ≥ 0.6 — narrow to tool-use only, state limitation. Week 16: small-scale RL shows no measurable defect–behaviour link — report as negative result, scope Direction 3 as future work.
 
 ---
 
-## 9. Risks and the honest answers
+## 9. Risks
 
 | Risk | Reality | Mitigation |
 |---|---|---|
-| Prior paper owns code hackability | True | Lead with non-code + multi-axis + tool; cite and extend, don't reinvent. The paper's actual contribution is Phase 2, not Phase 1. |
-| Labs copy the method, don't pay | Certain | Payer is vendor/post-training tier; real ROI is paper + position |
-| Ground truth is expensive and can be low-quality if unmanaged | True | §5a protocol: pilot + inter-rater agreement before scaling; cap at 200–300 labels; labelling protocol is part of the paper |
-| Exploit generation is noisy ("wrong" solutions that are actually right) | Real | Mandatory human-verified subset; report precision of the adversary itself, budgeted separately from the environment ground-truth labels (they are not the same pool) |
-| A "cleared" task later gets hacked publicly | Will happen | Scores are probabilistic with stated attack budget; never say "verified" |
-| Format fragmentation | Real | Build on `verifiers`; adapters only for 2 more formats |
-| Transfer axis unreachable solo | True | Partner or omit; never fake it |
-| Somebody big ships this in month 3 | Possible | Speed + public leaderboard first; your benchmark is harder to copy than the tool |
-| **Vendor incentive conflict — audited parties have no reason to cooperate with public exposure** | **Real, previously unaddressed** | **§5b disclosure policy: private audit + fixed response window before public listing** |
-| **Single Trust Score gets Goodharted the same way the environments it audits do** | **Real** | **Per-axis leaderboard columns are the primary artifact (§3); Trust Score ships with a stated limitation, never used alone in marketing** |
-| **Difficulty/diversity probes produce false positives on legitimately hard/unique tasks, damaging credibility** | **Real** | **Human review required before any public DROP driven solely by difficulty or diversity evidence (§3)** |
-| **Solo-plus-one-part-time bandwidth vs. 16-week scope for 5 probes / 3 formats / 6-8 envs / 300 labels / repair / benchmark / paper** | **Real** | **Explicit cut order if behind schedule: 1) drop `repair/` entirely, 2) ship with 2 adapter formats instead of 3, note the third as future work, 3) prefer fewer environments with real labels over more with shallow ones. Never cut: gold_sanity, hackability, the labelling protocol, or the paper itself.** |
+| Code half already published | Certain | Replicate and cite; lead with non-code |
+| "It's mutation testing" | Certain | Say so; frame as mutation adequacy for reward functions; novelty = semantic mutants + graded rewards + auditor precision |
+| Judge-bias probes not novel | Certain | Sub-result only; use CALM/JudgeBench protocols |
+| Adversary produces correct "exploits" | Real | Certification pipeline + reported precision |
+| **Certifier judge inherits the same trust problem being studied** | **Real, previously unaddressed** | **§1a: validate the certifier against the human-labelled subset; report its own agreement rate, not just the adversary's precision** |
+| Rubric ground truth subjective | Real | 2–3 annotators, κ, disagreement category |
+| No RL evidence | Likely solo | 4090 small-scale or partner; otherwise honest scoping |
+| API cost overrun | Likely | Open models for bulk; frontier for certification only |
+| **Scope grew faster than the timeline (Direction 3 especially)** | **Real** | **§7a: explicit cut order, Direction 3 first, decided now rather than under deadline pressure** |
+| Someone bigger publishes first | Possible | Post week-1 and week-8 results publicly |
 
 ---
 
-## 10. Week-1 checklist (do these, in order)
+## 10. Week-1 checklist
 
-- [ ] Read 2606.16062 end to end; write a one-page summary of its method and gaps.
-- [ ] Read 2606.04923; list every judge bias it names.
-- [ ] Skim one mutation-testing or test-oracle-quality paper (§2 item 11).
-- [ ] Install `verifiers`; run one hub environment end to end with an open model.
-- [ ] Pick your 3 starter environments (1 code, 1 tool, 1 rubric). Write down why.
-- [ ] Hand-write exploits E1, E5, E6, E9, E10.
-- [ ] Produce 20 wrong solutions (manual + LLM-assisted), verify each is genuinely wrong.
-- [ ] Run them through the graders. Record pass rate per environment.
-- [ ] Create the public repo (`envcheck`), MIT/Apache-2.0 license, README with the number. **(done — repo live)**
-- [ ] Post the write-up. Send it to Pragathi and to your friends at bandr; ask one question: "would you run this on your envs?"
-
----
-
-## 11. People to loop in
-
-- Pragathi — co-builder; labelling + rubric environment construction; co-labeler for the §5a pilot agreement pass.
-- Dr. Shylaja — research framing, venue choice, possible GPU access for transfer.
-- bandr founders — first pilot user and potential transfer partner.
-- Prime Intellect hub maintainers — integration + distribution; they benefit from an audit tool for their hub.
-
----
-
-## 12. What "winning" looks like in 12 months (beyond this plan)
-
-The Trust Score appears in environment vendors' sales decks. A lab cites EnvTrust-Bench in a system card. The `verifiers` docs link envcheck as the recommended pre-publish check. You're the reference for "is this environment's reward signal trustworthy?" — which is the position from which contracts, roles, or a company become possible.
-
-This depends on vendors experiencing envcheck as something that helps them, not something that ambushes them — §5b's disclosure policy is what makes that experience possible. Skipping it in the name of speed would undercut this exact goal.
+- [ ] Set up vLLM on the 4090 with a 14B 4-bit model; confirm throughput for K=8 generation.
+- [ ] Read 2606.16062 fully; one-page method + gaps summary.
+- [ ] Read 2606.04923; list injected biases and the drift metrics.
+- [ ] `pip install verifiers`; run τ-bench retail end to end with an open model.
+- [ ] Write 20 plausible-wrong solutions for 20 τ-bench tasks (manual + LLM-assisted).
+- [ ] Two people label each independently; compute κ.
+- [ ] Run through the state checker; record acceptance rate.
+- [ ] Create public repo (Apache-2.0), README with the number. **(repo already live, MIT — revisit license choice against this plan's Apache-2.0 preference before the public benchmark release)**
+- [ ] Message advisor (venue/authorship) and bandr (RL partner ask).
