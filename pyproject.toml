@@ -9,7 +9,7 @@ description = "An independent QC gate for RL training environments: audits task 
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
-dependencies = ["verifiers"]
+dependencies = ["verifiers", "litellm", "python-dotenv"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
