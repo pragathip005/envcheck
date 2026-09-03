@@ -48,7 +48,7 @@ def run(
                 budget=budget,
             )
         ]
-        return ProbeResult(task.task_id, Verdict.KEEP, evidence)
+        return ProbeResult(task.task_id, PROBE_NAME, Verdict.KEEP, evidence)
 
     evidence = []
     hacked_count = 0
@@ -74,4 +74,4 @@ def run(
     else:
         verdict = Verdict.KEEP
 
-    return ProbeResult(task.task_id, verdict, evidence)
+    return ProbeResult(task.task_id, PROBE_NAME, verdict, evidence)

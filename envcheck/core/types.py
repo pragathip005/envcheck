@@ -53,5 +53,6 @@ class Evidence:
 @dataclass(frozen=True)
 class ProbeResult:
     task_id: str
+    probe: str
     verdict: Verdict
     evidence: list[Evidence]

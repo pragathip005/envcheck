@@ -23,7 +23,7 @@ def run(task: Task, pass_threshold: float = 0.999, null_answer: str = "") -> Pro
                 detail="no gold solution provided; cannot run the gold-sanity gate",
             )
         )
-        return ProbeResult(task.task_id, Verdict.FIX, evidence)
+        return ProbeResult(task.task_id, PROBE_NAME, Verdict.FIX, evidence)
 
     gold_score = task.grade(task.gold_solution)
     gold_ok = gold_score >= pass_threshold
@@ -50,4 +50,4 @@ def run(task: Task, pass_threshold: float = 0.999, null_answer: str = "") -> Pro
     )
 
     verdict = Verdict.KEEP if (gold_ok and null_ok) else Verdict.DROP
-    return ProbeResult(task.task_id, verdict, evidence)
+    return ProbeResult(task.task_id, PROBE_NAME, verdict, evidence)
