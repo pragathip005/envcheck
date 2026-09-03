@@ -509,6 +509,128 @@ cases), scaling coverage to the full pool is mechanical, not risky, and can
 resume anytime by rerunning the same `c1.hardtests_tests.fetch_for_pids`
 call, ideally backgrounded properly instead of watched live next time.
 
+### 2026-09-03 — Second machine: this laptop is not the 4090 box, and doesn't have its cache
+Picked this up on a separate Windows laptop (RTX 3050, 4GB VRAM, no Docker -
+confirmed independently via both sandboxed Bash and plain PowerShell, so not
+a sandboxing artifact). This contradicts an earlier entry above claiming
+"this machine is the v4 dev environment: RTX 4090 (24GB)... Docker
+28.5.1" - that entry was describing the college 4090 machine, not this one;
+the two sessions share this git history but not local state. Confirmed with
+the user: the 4090 is a separate, **college-owned machine with no admin
+rights**, and the WSL2/Docker fix from the entries above needs to happen
+there in person - deferred to tomorrow.
+
+Practical consequence: `c1/data/` (the validated pool, gitignored) and
+`c1/`'s own venv don't exist on this laptop - they're machine-local caches,
+not something `git pull` carries over. `c1/README.md` had also drifted
+stale (still said V2 was "not yet done" and didn't mention `evilgenie.py`)
+- fixed. `datasets`/`huggingface_hub` turned out to already be present in
+this laptop's main `.venv` for unrelated reasons, so `c1/` code is at least
+importable here even without the cached pool.
+
+### 2026-09-03 — Configured real API keys; built C2's cross-family judge
+Groq (console.groq.com) and Gemini (aistudio.google.com) both confirmed
+genuinely free, no credit card. Added `.env` at the repo root (already
+covered by `.gitignore`) with `GROQ_API_KEY` / `GEMINI_API_KEY`.
+
+**Both keys verified with live calls, not just presence-checked.** First
+attempt at each failed with a real, informative provider error rather than
+an auth error - proof the keys work, wrong model names:
+`groq/llama-3.3-70b-versatile` was deprecated 2026-08-16 (Groq's own error
+named the replacement); `gemini/gemini-2.5-flash` is retired for new users
+(Google's error named `gemini-3.6-flash`). Corrected both from the actual
+error messages, not by guessing again. Working models going forward:
+`groq/openai/gpt-oss-120b`, `gemini/gemini-3.6-flash`.
+
+**Built `envcheck/probes/certify.py`'s second half**: `certify_cross_family_judge`,
+the LLM half of C2's "every hack must fail a gold-diff or cross-family judge
+check" (plan.md §3), alongside yesterday's LLM-free `certify_gold_diff`.
+Deliberately does *not* import `c1/evilgenie.py`'s judge prompt - that
+prompt is competitive-programming-specific (mentions Python code blocks,
+`test_cases.json`), while `certify.py` is meant to generalize to C3's
+state-checked/rubric environments too, so it got its own generic prompt
+instead. `envcheck` importing from `c1` would also invert the intended
+dependency direction (plan.md §1a: `c1/` is a downstream consumer of
+`envcheck`'s probes, not the other way around).
+
+**Ran a code review (`/code-review high envcheck/ c1/ --fix`) against the
+day's diff - found 4 real bugs, all in the new LLM-response-handling code**:
+1. Both `certify.py` and `evilgenie.py` used `bool(parsed[...])` on a judge's
+   JSON field - `bool("false")` is `True` in Python, so a judge returning the
+   *string* `"false"` instead of the JSON literal `false` would have been
+   silently miscoerced. Fixed with a strict `isinstance(x, bool)` check that
+   raises/errors instead. (The `evilgenie.py` instance of this exact pattern
+   wasn't in the reviewed diff's scope and the tool didn't flag it, but it's
+   the identical bug - fixed it too rather than leave one twin patched.)
+2. Both crashed with a raw `AttributeError` on `None` message content
+   (a real possibility - content filtering, certain finish reasons) instead
+   of the clean error/exception each already promises for other parse
+   failures.
+3. `certify.py` had reinvented JSON-fence-stripping, weaker than
+   `evilgenie.py`'s existing version (only stripped fences at the very start
+   of the text, not after leading prose). Extracted the more robust version
+   into a new shared module, `envcheck/core/llm_json.py`, and pointed both
+   call sites at it - removes the duplication and fixes the weaker copy in
+   one move. `c1` importing from `envcheck` (not the reverse) keeps the
+   dependency direction from plan.md §1a intact.
+
+Note for next time: `--fix` was passed to the `/code-review` invocation but
+the tool's own output said "No `--fix` was requested for this run, so no
+changes were applied" - applied all four fixes by hand instead. Worth
+noticing if this recurs: don't assume `--fix` took effect without checking
+the working tree.
+
+Added 10 new tests covering all of the above, including the first automated
+tests for `evilgenie.py` at all (it had only ever been verified by hand
+before today, per the entries above) and 2 live integration tests that make
+real calls against the configured Groq key. 55/55 passing.
+
+### 2026-09-03 — Built the solver ensemble + validity constraint (C2 items 2-3); two more real bugs, both from live testing
+Built `envcheck/probes/solver_ensemble.py`: `run_solver_ensemble` (asks
+several models to attempt a task independently), `ensemble_pass_rate`
+(fraction that pass a given grader), and `check_validity_constraint`
+(plan.md §3: reject a verifier patch if the ensemble's benign pass rate
+drops by more than epsilon). A `Solver` is a `(model, style)` pair, not just
+a model - plan.md §3 requires the ensemble to vary along *two* axes
+(">=2 model families, >=2 solution styles"), and keying candidates by a
+label rather than bare model name lets two members share a model with
+different styles without colliding.
+
+**Two more real bugs, both only surfaced by actually running live calls -
+mocked tests alone would have missed both:**
+
+1. `check_validity_constraint(0.9, 0.85, epsilon=0.05)` failed its own
+   "holds at exactly epsilon" test: `0.9 - 0.85 == 0.050000000000000044` in
+   IEEE floats, not exactly `0.05`, so a boundary case flipped `holds` to
+   `False` on rounding noise rather than the real comparison. Fixed with a
+   tiny absolute tolerance (`epsilon + 1e-9`) - deliberate, not just a
+   test-value change, since real rates are k/n fractions and this class of
+   boundary will recur anywhere epsilon-sweeps get compared against a
+   measured rate.
+2. A live ensemble test failed with Gemini silently returning an empty
+   string. Debugging *outside* the code's own try/except (which was
+   swallowing the real exception) found the actual cause: a genuine
+   `503 GeminiException - "This model is currently experiencing high
+   demand"` - a real, transient provider outage, not a bug in our request.
+   The deeper problem: recording a transient provider hiccup as an empty
+   answer conflates "the provider was briefly down" with "the model failed
+   the task," which would bias the validity constraint against a benign
+   patch that only happened to hit unlucky timing. Added `num_retries=3` to
+   the `litellm.completion` call (confirmed via `inspect.signature` +
+   grepping litellm's own source for `num_retries` - it's tenacity-backed,
+   not a parameter litellm documents prominently in its call signature).
+   That alone made a re-run take **~25 minutes** for 13 tests, because a
+   single hung attempt could stall arbitrarily long before its own retry
+   even started - `num_retries` bounds retry *count*, not per-attempt
+   *latency*. Added `timeout=30.0` alongside it, which cut the same suite to
+   **~2.5 minutes**. Both numbers are measured, not guessed - the fix was
+   confirmed by literally re-running the same live suite before and after.
+
+Added a regression test asserting both `num_retries` and `timeout` are
+actually passed through on every call, so a future refactor can't silently
+drop either and reintroduce the 25-minute failure mode. 68/68 passing
+across the whole project.
+
 ---
 
 ## Concepts
